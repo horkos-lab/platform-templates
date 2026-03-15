@@ -1,0 +1,78 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: nodejs-library
+  title: Node.js Library
+  description: Crea una librería TypeScript publicable con tsup para bundling
+  tags:
+    - nodejs
+    - typescript
+    - library
+spec:
+  owner: group:default/platform-team
+  type: library
+
+  parameters:
+    - title: Información de la librería
+      required:
+        - name
+      properties:
+        name:
+          title: Nombre del paquete
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          description: Nombre del paquete npm (sin @scope)
+          ui:autofocus: true
+          ui:help: Solo minúsculas, números y guiones. Ej. my-utils
+        description:
+          title: Descripción
+          type: string
+          default: ''
+          description: Descripción breve de la librería
+
+    - title: Ubicación del repositorio en GitHub
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Repositorio GitHub
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  steps:
+    - id: fetch
+      name: Generar archivos del skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          name: ${{ parameters.name }}
+          description: ${{ parameters.description }}
+          repoUrl: ${{ parameters.repoUrl }}
+
+    - id: publish
+      name: Publicar en GitHub
+      action: publish:github
+      input:
+        description: Librería TypeScript - ${{ parameters.name }}
+        repoUrl: ${{ parameters.repoUrl }}
+        defaultBranch: main
+        repoVisibility: private
+
+    - id: register
+      name: Registrar en el catálogo
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+  output:
+    links:
+      - title: Repositorio en GitHub
+        url: ${{ steps['publish'].output.remoteUrl }}
+      - title: Ver en el catálogo
+        icon: catalog
+        entityRef: ${{ steps['register'].output.entityRef }}

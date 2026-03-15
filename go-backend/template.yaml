@@ -1,8 +1,8 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: go-http-service
-  title: Go HTTP Service
+  name: go-backend
+  title: Go Backend Service
   description: Crea un servicio HTTP en Go con Dockerfile y manifests K8s listos para OrbStack
   tags:
     - go

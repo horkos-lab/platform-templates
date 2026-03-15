@@ -1,0 +1,71 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: angular-frontend
+  title: Angular Frontend
+  description: Crea una SPA Angular con Angular CLI y Dockerfile Nginx
+  tags:
+    - angular
+    - typescript
+spec:
+  owner: group:default/platform-team
+  type: website
+
+  parameters:
+    - title: Información de la aplicación
+      required:
+        - name
+      properties:
+        name:
+          title: Nombre de la aplicación
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          description: Nombre del repositorio y de la aplicación
+          ui:autofocus: true
+          ui:help: Solo minúsculas, números y guiones. Ej. my-app
+
+    - title: Ubicación del repositorio en GitHub
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Repositorio GitHub
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  steps:
+    - id: fetch
+      name: Generar archivos del skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          name: ${{ parameters.name }}
+          repoUrl: ${{ parameters.repoUrl }}
+
+    - id: publish
+      name: Publicar en GitHub
+      action: publish:github
+      input:
+        description: Angular frontend - ${{ parameters.name }}
+        repoUrl: ${{ parameters.repoUrl }}
+        defaultBranch: main
+        repoVisibility: private
+
+    - id: register
+      name: Registrar en el catálogo
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+  output:
+    links:
+      - title: Repositorio en GitHub
+        url: ${{ steps['publish'].output.remoteUrl }}
+      - title: Ver en el catálogo
+        icon: catalog
+        entityRef: ${{ steps['register'].output.entityRef }}

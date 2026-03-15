@@ -1,0 +1,8 @@
+[package]
+name = "${{ values.name }}"
+version = "0.1.0"
+edition = "2021"
+description = "${{ values.description }}"
+license = "MIT"
+
+[dependencies]

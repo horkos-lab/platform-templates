@@ -1,0 +1,80 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: nodejs-backend
+  title: Node.js Backend Service
+  description: Crea un servicio HTTP en Node.js con Fastify + TypeScript, Dockerfile y manifests K8s
+  tags:
+    - nodejs
+    - typescript
+    - fastify
+    - kubernetes
+spec:
+  owner: group:default/platform-team
+  type: service
+
+  parameters:
+    - title: Información del servicio
+      required:
+        - name
+        - port
+      properties:
+        name:
+          title: Nombre del servicio
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          description: Nombre del repositorio y del servicio
+          ui:autofocus: true
+          ui:help: Solo minúsculas, números y guiones. Ej. my-api
+        port:
+          title: Puerto HTTP
+          type: integer
+          default: 3000
+          description: Puerto en el que escuchará el servicio
+
+    - title: Ubicación del repositorio en GitHub
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Repositorio GitHub
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  steps:
+    - id: fetch
+      name: Generar archivos del skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          name: ${{ parameters.name }}
+          port: ${{ parameters.port }}
+          repoUrl: ${{ parameters.repoUrl }}
+
+    - id: publish
+      name: Publicar en GitHub
+      action: publish:github
+      input:
+        description: Servicio HTTP en Node.js/Fastify - ${{ parameters.name }}
+        repoUrl: ${{ parameters.repoUrl }}
+        defaultBranch: main
+        repoVisibility: private
+
+    - id: register
+      name: Registrar en el catálogo
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+  output:
+    links:
+      - title: Repositorio en GitHub
+        url: ${{ steps['publish'].output.remoteUrl }}
+      - title: Ver en el catálogo
+        icon: catalog
+        entityRef: ${{ steps['register'].output.entityRef }}

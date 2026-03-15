@@ -5,7 +5,10 @@ metadata:
   description: Índice central de todos los templates de la plataforma
 spec:
   targets:
-    - ./go-http-service/template.yaml
-    # Agregar nuevos templates aquí:
-    # - ./nodejs-service/template.yaml
-    # - ./python-api/template.yaml
+    - ./go-backend/template.yaml
+    - ./nodejs-backend/template.yaml
+    - ./rust-backend/template.yaml
+    - ./react-frontend/template.yaml
+    - ./angular-frontend/template.yaml
+    - ./nodejs-library/template.yaml
+    - ./rust-library/template.yaml
