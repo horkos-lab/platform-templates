@@ -7,69 +7,84 @@ import (
 	"github.com/${{ (values.repoUrl | parseRepoUrl).owner }}/${{ values.name }}/internal/item/domain"
 )
 
-func TestNewName_Valid(t *testing.T) {
-	n, err := domain.NewName("widget")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestNewName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "valid name", input: "widget", want: "widget"},
+		{name: "trims leading and trailing spaces", input: "  widget  ", want: "widget"},
+		{name: "empty string", input: "", wantErr: true},
+		{name: "whitespace only", input: "   ", wantErr: true},
 	}
-	if string(n) != "widget" {
-		t.Fatalf("want 'widget', got %q", n)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := domain.NewName(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("NewName(%q): expected error, got nil", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewName(%q): unexpected error: %v", tc.input, err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("NewName(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
 	}
 }
 
-func TestNewName_Trim(t *testing.T) {
-	n, err := domain.NewName("  widget  ")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(n) != "widget" {
-		t.Fatalf("want trimmed 'widget', got %q", n)
-	}
-}
+func TestNewID(t *testing.T) {
+	t.Parallel()
 
-func TestNewName_Empty(t *testing.T) {
-	_, err := domain.NewName("")
-	if err == nil {
-		t.Fatal("expected error for empty name")
-	}
-}
+	t.Run("non-empty", func(t *testing.T) {
+		t.Parallel()
+		id := domain.NewID()
+		if string(id) == "" {
+			t.Fatal("NewID() returned empty string")
+		}
+	})
 
-func TestNewName_Whitespace(t *testing.T) {
-	_, err := domain.NewName("   ")
-	if err == nil {
-		t.Fatal("expected error for whitespace-only name")
-	}
-}
-
-func TestNewID_NotEmpty(t *testing.T) {
-	id := domain.NewID()
-	if string(id) == "" {
-		t.Fatal("expected non-empty ID")
-	}
-}
-
-func TestNewID_Unique(t *testing.T) {
-	id1 := domain.NewID()
-	id2 := domain.NewID()
-	if id1 == id2 {
-		t.Fatal("expected unique IDs")
-	}
+	t.Run("unique across calls", func(t *testing.T) {
+		t.Parallel()
+		id1 := domain.NewID()
+		id2 := domain.NewID()
+		if id1 == id2 {
+			t.Fatalf("NewID() returned duplicate value %q", id1)
+		}
+	})
 }
 
 func TestNewItem(t *testing.T) {
-	name, _ := domain.NewName("widget")
+	t.Parallel()
+
+	name, err := domain.NewName("widget")
+	if err != nil {
+		t.Fatalf("NewName: %v", err)
+	}
+
+	before := time.Now().UTC()
 	item := domain.NewItem(name)
+	after := time.Now().UTC()
 
 	if string(item.ID) == "" {
-		t.Fatal("expected non-empty ID")
+		t.Fatal("NewItem: ID is empty")
 	}
 	if item.Name != name {
-		t.Fatalf("want Name=%q, got %q", name, item.Name)
+		t.Fatalf("NewItem: Name = %q, want %q", item.Name, name)
 	}
 	if item.CreatedAt.IsZero() {
-		t.Fatal("expected non-zero CreatedAt")
+		t.Fatal("NewItem: CreatedAt is zero")
 	}
-	if item.CreatedAt.After(time.Now().UTC()) {
-		t.Fatal("CreatedAt is in the future")
+	if item.CreatedAt.Before(before) || item.CreatedAt.After(after) {
+		t.Fatalf("NewItem: CreatedAt %v is outside [%v, %v]", item.CreatedAt, before, after)
 	}
 }

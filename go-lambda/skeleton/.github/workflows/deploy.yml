@@ -4,34 +4,77 @@ on:
   push:
     branches: [main]
 
+# Ensure only one Terraform apply runs at a time per repository.
+# cancel-in-progress: false queues new runs instead of cancelling them,
+# preventing concurrent state modifications.
+concurrency:
+  group: terraform-${{ github.repository }}
+  cancel-in-progress: false
+
+# Principle of least privilege:
+#   id-token: write  — required to exchange an OIDC token for AWS credentials
+#   contents: read   — required by actions/checkout
+#   actions: write   — required by `gh variable set` (writes a repo Actions variable)
 permissions:
   id-token: write
-  contents: write
+  contents: read
+  actions: write
 
 jobs:
   deploy:
     name: Build & Deploy
     runs-on: ubuntu-latest
+    # Terraform apply can take time on first run (Lambda packaging, IAM propagation).
+    # 30 min is generous for a Lambda stack while catching truly hung runs.
+    timeout-minutes: 30
     steps:
+      - name: Validate AWS role ARN
+        # At least one of AWS_ROLE_ARN (service role, set after bootstrap) or
+        # AWS_PLATFORM_ROLE_ARN (platform/bootstrap role) must be configured.
+        # Failing here gives a clear error instead of a cryptic OIDC failure.
+        run: |
+          ROLE_ARN="${{ vars.AWS_ROLE_ARN || vars.AWS_PLATFORM_ROLE_ARN }}"
+          if [[ -z "$ROLE_ARN" ]]; then
+            echo "::error::Neither AWS_ROLE_ARN nor AWS_PLATFORM_ROLE_ARN is set. \
+          Configure at least one Actions variable before deploying."
+            exit 1
+          fi
+          # Validate the resolved ARN matches the expected IAM role ARN format:
+          # arn:<partition>:iam::<12-digit-account>:role/<role-name>
+          ROLE_ARN_PATTERN='^arn:(aws|aws-cn|aws-us-gov):iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+          if [[ ! "$ROLE_ARN" =~ $ROLE_ARN_PATTERN ]]; then
+            echo "::error::Role ARN '$ROLE_ARN' does not match the expected IAM role ARN format."
+            exit 1
+          fi
+          echo "Role ARN validated: $ROLE_ARN"
+
       - name: Checkout
-        uses: actions/checkout@v4
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        # actions/setup-go v5.4.0 — built-in Go module cache keyed on go.mod hash
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Install just
-        uses: extractions/setup-just@v2
+        # extractions/setup-just v3 (2025-03-15)
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b
+
+      - name: Download modules
+        run: go mod download
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        # hashicorp/setup-terraform v3.1.2
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
           terraform_wrapper: false
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        # aws-actions/configure-aws-credentials v4.0.3
+        uses: aws-actions/configure-aws-credentials@4fc4975a852c8cd99761e2de1f4ba73402e44dd9
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN || vars.AWS_PLATFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -40,10 +83,23 @@ jobs:
         run: just build && just package
 
       - name: Terraform Init
-        run: terraform -chdir=infra init
+        run: |
+          terraform -chdir=infra init \
+            -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
+            -backend-config="key=${{ github.event.repository.name }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_BACKEND_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Terraform Plan
+        # Save the plan to a file so that `apply` executes exactly what was reviewed.
+        # This prevents any configuration drift between plan and apply that could
+        # occur if apply re-evaluated the config (e.g. workspace changes, random resources).
+        run: terraform -chdir=infra plan -out=tfplan -input=false
 
       - name: Terraform Apply
-        run: terraform -chdir=infra apply -auto-approve
+        # Apply the saved plan — no re-evaluation, deterministic outcome.
+        run: terraform -chdir=infra apply -input=false tfplan
 
       - name: Bootstrap (first run only)
         if: vars.AWS_ROLE_ARN == ''
@@ -51,5 +107,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ROLE_ARN=$(terraform -chdir=infra output -raw github_deploy_role_arn)
+          # Validate the ARN returned by Terraform before storing it as a repo variable.
+          ROLE_ARN_PATTERN='^arn:(aws|aws-cn|aws-us-gov):iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+          if [[ ! "$ROLE_ARN" =~ $ROLE_ARN_PATTERN ]]; then
+            echo "::error::Output github_deploy_role_arn '$ROLE_ARN' is not a valid IAM role ARN."
+            exit 1
+          fi
           gh variable set AWS_ROLE_ARN --body "$ROLE_ARN"
 {% endraw %}

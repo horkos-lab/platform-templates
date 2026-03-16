@@ -1,36 +1,65 @@
 name := "${{ values.name }}"
 arch := "${{ values.architecture }}"
 
+# List available recipes
 default:
     @just --list
 
+# Cross-compile for provided.al2023 (Linux/arch). -tags lambda.norpc disables
+# the built-in net/rpc server, reducing cold-start time and binary footprint.
+# -ldflags="-s -w" strips the symbol table and DWARF debug info (~30 % smaller).
+# CGO_ENABLED=0 ensures a fully static binary with no libc dependency.
 build:
-    mkdir -p dist && GOOS=linux GOARCH={{arch}} CGO_ENABLED=0 go build -tags lambda.norpc -ldflags="-s -w" -o dist/bootstrap ./cmd/handler/
+    mkdir -p dist && \
+    GOOS=linux GOARCH={{arch}} CGO_ENABLED=0 \
+    go build -tags lambda.norpc -ldflags="-s -w" -trimpath \
+    -o dist/bootstrap ./cmd/handler/
 
+# Build and package into a zip ready for Terraform / AWS CLI upload
 package: build
     cd dist && zip -q function.zip bootstrap
 
+# Run the full test suite with race detector and coverage summary
 test:
-    go test ./... -race -cover
+    go test ./... -race -cover -covermode=atomic
 
+# Run tests with verbose output (useful in CI logs)
+test-verbose:
+    go test ./... -v -race -covermode=atomic
+
+# Generate an HTML coverage report and open it
 test-coverage:
-    go test ./... -coverprofile=coverage.out
+    go test ./... -race -covermode=atomic -coverprofile=coverage.out
     go tool cover -html=coverage.out -o coverage.html
 
+# Run benchmarks (useful for measuring cold-start handler allocations)
+bench:
+    go test ./... -bench=. -benchmem -run='^$$'
+
+# Lint with golangci-lint (must be installed separately)
 lint:
     golangci-lint run ./...
 
+# Tidy go.mod and go.sum
 tidy:
     go mod tidy
 
+# Verify module graph is consistent (good CI gate)
+verify:
+    go mod verify
+
+# Initialise Terraform working directory
 tf-init:
     terraform -chdir=infra init
 
+# Plan Terraform changes (builds and packages the binary first)
 tf-plan: build package
     terraform -chdir=infra plan
 
+# Apply Terraform changes (builds and packages the binary first)
 deploy: build package
     terraform -chdir=infra apply -auto-approve
 
+# Destroy all Terraform-managed resources
 destroy:
     terraform -chdir=infra destroy

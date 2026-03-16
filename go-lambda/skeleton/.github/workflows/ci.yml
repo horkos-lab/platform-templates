@@ -6,19 +6,35 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-progress CI runs on the same branch when a new push arrives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Principle of least privilege: CI only needs read access.
+# id-token is NOT needed here (no AWS calls).
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test & Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        # actions/setup-go v5.4.0 — built-in Go module cache via go.mod hash
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Install just
+        # extractions/setup-just v3 (latest stable, 2025-03-15)
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b
 
       - name: Download modules
         run: go mod download
@@ -27,7 +43,16 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./... -race -coverprofile=coverage.out
+        run: go test ./... -race -covermode=atomic -coverprofile=coverage.out
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${COVERAGE}%"
+          if [ "$(echo "${COVERAGE} < 70" | bc -l)" -eq 1 ]; then
+            echo "Coverage ${COVERAGE}% is below the 70% threshold" >&2
+            exit 1
+          fi
 
       - name: Build (Linux)
         run: just build

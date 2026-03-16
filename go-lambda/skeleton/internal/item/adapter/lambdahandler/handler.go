@@ -2,65 +2,140 @@ package lambdahandler
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
+	"runtime/debug"
 
-	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambdacontext"
 
 	"github.com/${{ (values.repoUrl | parseRepoUrl).owner }}/${{ values.name }}/internal/config"
+	"github.com/${{ (values.repoUrl | parseRepoUrl).owner }}/${{ values.name }}/internal/item/domain"
 	"github.com/${{ (values.repoUrl | parseRepoUrl).owner }}/${{ values.name }}/internal/item/port"
 )
 
+// Handler is the Lambda adapter. It translates direct-invocation JSON payloads
+// into domain calls and maps results back to JSON responses.
+// Replace Request/Response with your actual event types (SQS, EventBridge, etc.)
+// if this function is triggered by an AWS event source.
 type Handler struct {
 	svc    port.ItemService
 	logger *slog.Logger
 }
 
+// NewHandler constructs a Handler. Expensive resources (SDK clients, DB pools)
+// should be initialised here — they are reused across warm invocations.
+//
+// Both svc and cfg are required. Passing nil is a programming error; this
+// constructor panics in that case following the must-style convention used by
+// the standard library (regexp.MustCompile, template.Must, etc.) for
+// constructors that cannot return an error. Panics surface immediately in
+// tests and during process startup, making misconfiguration impossible to miss.
 func NewHandler(svc port.ItemService, cfg *config.Config) *Handler {
-	level := slog.LevelInfo
-	if cfg.LogLevel == "DEBUG" {
-		level = slog.LevelDebug
+	if svc == nil {
+		panic("lambdahandler.NewHandler: svc must not be nil")
 	}
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	if cfg == nil {
+		panic("lambdahandler.NewHandler: cfg must not be nil")
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	return &Handler{svc: svc, logger: logger}
 }
 
-func (h *Handler) Handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	method := req.RequestContext.HTTP.Method
-	path := req.RawPath
+// Handle is the Lambda entry point. Panics are caught and converted to Go
+// errors so the function fails cleanly instead of crashing the process.
+//
+// Error semantics — two distinct categories:
+//
+//  1. Application errors (validation failures, domain rule violations, resource
+//     not found): returned in Response.Error with a nil Go error. The Lambda
+//     invocation is marked *successful*; the caller decides how to react.
+//
+//  2. Infrastructure / unexpected errors (panics, unhandled service failures):
+//     returned as a non-nil Go error. Lambda marks the invocation as *failed*,
+//     which enables retries, DLQ routing, and CloudWatch alarms.
+func (h *Handler) Handle(ctx context.Context, req Request) (resp Response, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.ErrorContext(ctx, "panic recovered",
+				slog.Any("panic", r),
+				slog.String("stack", string(debug.Stack())),
+			)
+			err = fmt.Errorf("internal error")
+		}
+	}()
 
-	h.logger.InfoContext(ctx, "request", "method", method, "path", path)
+	log := h.requestLogger(ctx)
+	log.InfoContext(ctx, "invocation", slog.String("action", req.Action))
 
-	switch {
-	case method == http.MethodGet && path == "/items":
-		return h.listItems(ctx, req)
-	case method == http.MethodPost && path == "/items":
-		return h.createItem(ctx, req)
+	switch req.Action {
+	case "create":
+		return h.createItem(ctx, log, req)
+	case "list":
+		return h.listItems(ctx, log)
 	default:
-		return jsonResponse(http.StatusNotFound, errBody("route not found"))
+		return Response{Error: fmt.Sprintf("unknown action %q; valid: create, list", req.Action)}, nil
 	}
 }
 
-func (h *Handler) listItems(ctx context.Context, _ events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+func (h *Handler) requestLogger(ctx context.Context) *slog.Logger {
+	log := h.logger
+	if lc, ok := lambdacontext.FromContext(ctx); ok {
+		log = log.With(
+			slog.String("lambda_request_id", lc.AwsRequestID),
+			slog.String("function_arn", lc.InvokedFunctionArn),
+		)
+	}
+	return log
+}
+
+// listItems fetches all items. Service errors are treated as application-level
+// outcomes and surfaced in Response.Error (not as a Go error) so that the
+// Lambda invocation is recorded as successful and the caller can handle the
+// condition without triggering retry / DLQ logic.
+func (h *Handler) listItems(ctx context.Context, log *slog.Logger) (Response, error) {
 	items, err := h.svc.ListItems(ctx)
 	if err != nil {
-		h.logger.ErrorContext(ctx, "list items failed", "error", err)
-		return jsonResponse(http.StatusInternalServerError, errBody("failed to list items"))
+		log.ErrorContext(ctx, "list items failed", slog.String("error", err.Error()))
+		return Response{Error: safeErrorMessage(err)}, nil
 	}
-	return jsonResponse(http.StatusOK, newListResponse(items))
+	return newListResponse(items), nil
 }
 
-func (h *Handler) createItem(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	var body createItemRequest
-	if err := json.Unmarshal([]byte(req.Body), &body); err != nil {
-		return jsonResponse(http.StatusBadRequest, errBody("invalid request body"))
+func (h *Handler) createItem(ctx context.Context, log *slog.Logger, req Request) (Response, error) {
+	if len(req.Name) > config.MaxNameBytes {
+		return Response{Error: fmt.Sprintf("name exceeds maximum length of %d bytes", config.MaxNameBytes)}, nil
 	}
 
-	item, err := h.svc.CreateItem(ctx, body.Name)
+	item, err := h.svc.CreateItem(ctx, req.Name)
 	if err != nil {
-		return jsonResponse(httpStatusFor(err), errBody(err.Error()))
+		log.WarnContext(ctx, "create item failed",
+			slog.String("error", err.Error()),
+			slog.String("name", req.Name),
+		)
+		return Response{Error: safeErrorMessage(err)}, nil
 	}
-	return jsonResponse(http.StatusCreated, newItemResponse(item))
+
+	log.InfoContext(ctx, "item created", slog.String("item_id", string(item.ID)))
+	resp := newItemResponse(item)
+	return Response{Item: &resp}, nil
+}
+
+// safeErrorMessage maps known domain errors to their clean, user-safe messages
+// and returns a generic message for any unexpected error, preventing internal
+// implementation details from leaking to callers (OWASP: Improper Error
+// Handling / Information Exposure). The raw error is always logged before this
+// function is called so internal context is preserved for debugging.
+func safeErrorMessage(err error) string {
+	// Known domain errors carry messages that are already safe to expose.
+	switch {
+	case errors.Is(err, domain.ErrEmptyName):
+		return domain.ErrEmptyName.Error() // "name cannot be empty"
+	case errors.Is(err, domain.ErrItemNotFound):
+		return domain.ErrItemNotFound.Error() // "item not found"
+	}
+	// Unknown / infrastructure errors: return a generic message. The caller
+	// receives no internal detail; the full error is already in the logs.
+	return "an unexpected error occurred; please try again later"
 }

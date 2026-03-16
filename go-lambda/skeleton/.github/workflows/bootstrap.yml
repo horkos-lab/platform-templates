@@ -3,36 +3,73 @@
 on:
   workflow_dispatch:
 
+# Principle of least privilege:
+#   id-token: write  — required to exchange an OIDC token for AWS credentials
+#   contents: read   — required by actions/checkout
+#   actions: write   — required by `gh variable set` (writes a repo Actions variable)
 permissions:
   id-token: write
   contents: read
+  actions: write
 
 jobs:
   bootstrap:
     name: Manual bootstrap fallback
     runs-on: ubuntu-latest
+    # terraform init + apply for a bootstrap stack (IAM role, OIDC provider) is fast.
+    # 20 min is sufficient while preventing indefinitely hung runs.
+    timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        # hashicorp/setup-terraform v3.1.2
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
           terraform_wrapper: false
 
       - name: Configure AWS credentials (platform role)
-        uses: aws-actions/configure-aws-credentials@v4
+        # aws-actions/configure-aws-credentials v4.0.3
+        uses: aws-actions/configure-aws-credentials@4fc4975a852c8cd99761e2de1f4ba73402e44dd9
         with:
           role-to-assume: ${{ vars.AWS_PLATFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Terraform Init
-        run: terraform -chdir=infra init
+        run: |
+          terraform -chdir=infra init \
+            -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
+            -backend-config="key=${{ github.event.repository.name }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_BACKEND_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Terraform Validate
+        # Catches configuration syntax errors and internal inconsistencies before
+        # hitting the AWS API. Runs after init (providers must be installed) but
+        # does not require backend access — fast-fail with no AWS calls.
+        run: terraform -chdir=infra validate
+
+      - name: Terraform Plan
+        # Save the plan so apply executes exactly the reviewed changes.
+        run: terraform -chdir=infra plan -out=tfplan -input=false
+
+      - name: Terraform Apply
+        # Apply the saved plan — deterministic, no re-evaluation.
+        run: terraform -chdir=infra apply -input=false tfplan
 
       - name: Save deploy role ARN as repo variable
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ROLE_ARN=$(terraform -chdir=infra output -raw github_deploy_role_arn)
+          # Validate the ARN returned by Terraform before storing it as a repo variable.
+          ROLE_ARN_PATTERN='^arn:(aws|aws-cn|aws-us-gov):iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+          if [[ ! "$ROLE_ARN" =~ $ROLE_ARN_PATTERN ]]; then
+            echo "::error::Output github_deploy_role_arn '$ROLE_ARN' is not a valid IAM role ARN."
+            exit 1
+          fi
           gh variable set AWS_ROLE_ARN --body "$ROLE_ARN"
 {% endraw %}

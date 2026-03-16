@@ -3,9 +3,19 @@ output "function_arn" {
   value       = aws_lambda_function.this.arn
 }
 
-output "api_endpoint" {
-  description = "HTTP API endpoint URL"
-  value       = aws_apigatewayv2_api.this.api_endpoint
+output "function_name" {
+  description = "Name of the Lambda function"
+  value       = aws_lambda_function.this.function_name
+}
+
+output "log_group_name" {
+  description = "CloudWatch Logs log group name for the Lambda function"
+  value       = aws_cloudwatch_log_group.lambda.name
+}
+
+output "lambda_execution_role_arn" {
+  description = "ARN of the Lambda execution role"
+  value       = aws_iam_role.lambda.arn
 }
 
 output "github_deploy_role_arn" {

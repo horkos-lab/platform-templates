@@ -10,6 +10,7 @@ import (
 	"github.com/${{ (values.repoUrl | parseRepoUrl).owner }}/${{ values.name }}/internal/item/service"
 )
 
+// Compile-time assertion: stubRepo satisfies the ItemRepository port.
 var _ port.ItemRepository = (*stubRepo)(nil)
 
 type stubRepo struct {
@@ -29,53 +30,103 @@ func (s *stubRepo) ListItems(_ context.Context) ([]domain.Item, error) {
 	return s.items, nil
 }
 
-func TestCreateItem_Success(t *testing.T) {
-	svc := service.NewItemService(&stubRepo{})
-	item, err := svc.CreateItem(context.Background(), "widget")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(item.ID) == "" {
-		t.Fatal("expected non-empty ID")
-	}
-	if string(item.Name) != "widget" {
-		t.Fatalf("want name=widget, got %q", item.Name)
-	}
-}
+func TestCreateItem(t *testing.T) {
+	t.Parallel()
 
-func TestCreateItem_EmptyName(t *testing.T) {
-	svc := service.NewItemService(&stubRepo{})
-	_, err := svc.CreateItem(context.Background(), "")
-	if !errors.Is(err, domain.ErrEmptyName) {
-		t.Fatalf("want ErrEmptyName, got %v", err)
-	}
-}
-
-func TestCreateItem_RepoError(t *testing.T) {
 	repoErr := errors.New("storage unavailable")
-	svc := service.NewItemService(&stubRepo{saveErr: repoErr})
-	_, err := svc.CreateItem(context.Background(), "widget")
-	if !errors.Is(err, repoErr) {
-		t.Fatalf("want repo error, got %v", err)
+
+	tests := []struct {
+		name      string
+		inputName string
+		repoErr   error
+		wantErr   error
+		wantName  string
+	}{
+		{
+			name:      "success",
+			inputName: "widget",
+			wantName:  "widget",
+		},
+		{
+			name:      "whitespace is trimmed and accepted",
+			inputName: "  gadget  ",
+			wantName:  "gadget",
+		},
+		{
+			name:      "empty name returns domain error",
+			inputName: "",
+			wantErr:   domain.ErrEmptyName,
+		},
+		{
+			name:      "whitespace-only name returns domain error",
+			inputName: "   ",
+			wantErr:   domain.ErrEmptyName,
+		},
+		{
+			name:      "repository error is propagated",
+			inputName: "widget",
+			repoErr:   repoErr,
+			wantErr:   repoErr,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc := service.NewItemService(&stubRepo{saveErr: tc.repoErr})
+			item, err := svc.CreateItem(context.Background(), tc.inputName)
+
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("CreateItem(%q): error = %v, want %v", tc.inputName, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateItem(%q): unexpected error: %v", tc.inputName, err)
+			}
+			if string(item.ID) == "" {
+				t.Fatal("CreateItem: ID is empty")
+			}
+			if string(item.Name) != tc.wantName {
+				t.Fatalf("CreateItem: Name = %q, want %q", item.Name, tc.wantName)
+			}
+		})
 	}
 }
 
-func TestListItems_ReturnsSaved(t *testing.T) {
-	repo := &stubRepo{}
-	svc := service.NewItemService(repo)
+func TestListItems(t *testing.T) {
+	t.Parallel()
 
-	if _, err := svc.CreateItem(context.Background(), "alpha"); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if _, err := svc.CreateItem(context.Background(), "beta"); err != nil {
-		t.Fatalf("create: %v", err)
+	tests := []struct {
+		name        string
+		seedNames   []string
+		wantCount   int
+	}{
+		{name: "empty repository returns empty slice", seedNames: nil, wantCount: 0},
+		{name: "single item", seedNames: []string{"alpha"}, wantCount: 1},
+		{name: "multiple items", seedNames: []string{"alpha", "beta", "gamma"}, wantCount: 3},
 	}
 
-	items, err := svc.ListItems(context.Background())
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(items) != 2 {
-		t.Fatalf("want 2 items, got %d", len(items))
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := &stubRepo{}
+			svc := service.NewItemService(repo)
+
+			for _, n := range tc.seedNames {
+				if _, err := svc.CreateItem(context.Background(), n); err != nil {
+					t.Fatalf("seed CreateItem(%q): %v", n, err)
+				}
+			}
+
+			items, err := svc.ListItems(context.Background())
+			if err != nil {
+				t.Fatalf("ListItems: unexpected error: %v", err)
+			}
+			if len(items) != tc.wantCount {
+				t.Fatalf("ListItems: got %d items, want %d", len(items), tc.wantCount)
+			}
+		})
 	}
 }
