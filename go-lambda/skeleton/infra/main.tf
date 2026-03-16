@@ -107,7 +107,7 @@ resource "aws_lambda_function" "this" {
   # The zip is built by the CI pipeline (just build && just package) and placed
   # at dist/function.zip relative to the repository root before Terraform runs.
   filename         = "${path.module}/../dist/function.zip"
-  source_code_hash = filebase64sha256("${path.module}/../dist/function.zip")
+  source_code_hash = fileexists("${path.module}/../dist/function.zip") ? filebase64sha256("${path.module}/../dist/function.zip") : null
 
   role        = aws_iam_role.lambda.arn
   timeout     = var.timeout
