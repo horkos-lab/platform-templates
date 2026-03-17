@@ -1,0 +1,142 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: client-project
+  title: Nuevo Proyecto para Cliente
+  description: >
+    Crea un nuevo proyecto (System) asociado a un cliente existente,
+    genera su repositorio en GitHub y lo registra en el Catalog.
+  tags:
+    - client
+    - project
+    - system
+spec:
+  owner: group:default/platform-team
+  type: system
+
+  parameters:
+    - title: Información del Proyecto
+      required:
+        - projectName
+        - projectTitle
+        - clientRef
+        - projectType
+      properties:
+        projectName:
+          title: Identificador del Proyecto (slug)
+          type: string
+          description: >
+            Identificador único sin espacios ni mayúsculas. Ej: acme-erp-v2, portal-empleados.
+          pattern: '^[a-z0-9-]+$'
+          ui:autofocus: true
+        projectTitle:
+          title: Nombre del Proyecto
+          type: string
+          description: Nombre descriptivo del proyecto tal como aparecerá en el portal.
+        projectDescription:
+          title: Descripción del Proyecto
+          type: string
+          description: Breve descripción del alcance y objetivo del proyecto.
+          ui:widget: textarea
+          ui:options:
+            rows: 3
+        clientRef:
+          title: Cliente
+          type: string
+          description: Cliente propietario de este proyecto.
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              - kind: Group
+                spec.type: client
+        projectType:
+          title: Tipo de Proyecto
+          type: string
+          enum:
+            - service
+            - website
+            - data-pipeline
+            - library
+          enumNames:
+            - Servicio / Microservicio
+            - Sitio Web / Portal
+            - Pipeline de Datos
+            - Librería / SDK
+        lifecycle:
+          title: Estado del Ciclo de Vida
+          type: string
+          enum:
+            - experimental
+            - production
+            - deprecated
+          default: experimental
+          enumNames:
+            - Experimental (en desarrollo)
+            - Producción
+            - Deprecado
+
+    - title: Repositorio del Proyecto
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Ubicación del Repositorio
+          type: string
+          description: Repositorio GitHub del proyecto.
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  steps:
+    - id: fetch-template
+      name: Generar estructura del proyecto
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          projectName: ${{ parameters.projectName }}
+          projectTitle: ${{ parameters.projectTitle }}
+          projectDescription: ${{ parameters.projectDescription }}
+          clientRef: ${{ parameters.clientRef }}
+          projectType: ${{ parameters.projectType }}
+          lifecycle: ${{ parameters.lifecycle }}
+
+    - id: publish
+      name: Publicar repositorio en GitHub
+      action: publish:github
+      input:
+        description: "${{ parameters.projectTitle }} — proyecto de ${{ parameters.clientRef }}"
+        repoUrl: ${{ parameters.repoUrl }}
+        defaultBranch: main
+        repoVisibility: private
+
+    - id: register
+      name: Registrar proyecto en el Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+    - id: notify
+      name: Notificar al equipo del cliente
+      action: notification:send
+      continueOnError: true
+      input:
+        recipients: entity
+        entityRefs:
+          - ${{ parameters.clientRef }}
+        title: "Nuevo proyecto creado: ${{ parameters.projectTitle }}"
+        info: >
+          El proyecto ${{ parameters.projectTitle }} ha sido creado y registrado en el portal.
+          Revisa el repositorio y la página del proyecto en el Catalog.
+        severity: normal
+
+  output:
+    links:
+      - title: Proyecto en el Catalog
+        icon: catalog
+        entityRef: ${{ steps['register'].output.entityRef }}
+      - title: Repositorio del Proyecto
+        icon: github
+        url: ${{ steps['publish'].output.remoteUrl }}

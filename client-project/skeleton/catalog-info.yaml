@@ -1,0 +1,13 @@
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: ${{ values.projectName }}
+  title: ${{ values.projectTitle }}
+  description: ${{ values.projectDescription }}
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+  labels:
+    project-type: ${{ values.projectType }}
+    lifecycle: ${{ values.lifecycle }}
+spec:
+  owner: ${{ values.clientRef }}

@@ -1,0 +1,9 @@
+site_name: "${{ values.clientTitle }} — Documentación"
+site_description: "Documentación de onboarding y runbooks para ${{ values.clientTitle }}"
+
+nav:
+  - Inicio: index.md
+  - Checklist de Onboarding: onboarding-checklist.md
+
+plugins:
+  - techdocs-core

@@ -1,0 +1,8 @@
+site_name: "${{ values.serviceTitle }}"
+site_description: "Documentación técnica de ${{ values.serviceTitle }}"
+
+nav:
+  - Inicio: index.md
+
+plugins:
+  - techdocs-core

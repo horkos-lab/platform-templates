@@ -13,3 +13,6 @@ spec:
     - ./angular-frontend/template.yaml
     - ./nodejs-library/template.yaml
     - ./rust-library/template.yaml
+    - ./client-onboarding/template.yaml
+    - ./client-project/template.yaml
+    - ./client-service/template.yaml

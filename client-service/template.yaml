@@ -1,0 +1,152 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: client-service
+  title: Nuevo Servicio / Componente dentro de un Proyecto
+  description: >
+    Crea un nuevo servicio o componente dentro de un proyecto (System) existente,
+    genera su repositorio en GitHub y lo registra en el Catalog.
+  tags:
+    - client
+    - service
+    - component
+spec:
+  owner: group:default/platform-team
+  type: service
+
+  parameters:
+    - title: Información del Servicio
+      required:
+        - serviceName
+        - serviceTitle
+        - projectRef
+        - clientRef
+        - serviceType
+      properties:
+        serviceName:
+          title: Identificador del Servicio (slug)
+          type: string
+          description: Identificador único sin espacios ni mayúsculas. Ej: payments-api, user-portal.
+          pattern: '^[a-z0-9-]+$'
+          ui:autofocus: true
+        serviceTitle:
+          title: Nombre del Servicio
+          type: string
+          description: Nombre descriptivo tal como aparecerá en el portal.
+        serviceDescription:
+          title: Descripción del Servicio
+          type: string
+          description: Qué hace este servicio y su rol dentro del proyecto.
+          ui:widget: textarea
+          ui:options:
+            rows: 3
+        projectRef:
+          title: Proyecto al que pertenece
+          type: string
+          description: Sistema (proyecto) padre de este servicio.
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              - kind: System
+        clientRef:
+          title: Cliente propietario
+          type: string
+          description: Cliente dueño de este servicio (debe coincidir con el dueño del proyecto).
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              - kind: Group
+                spec.type: client
+        serviceType:
+          title: Tipo de Servicio
+          type: string
+          enum:
+            - service
+            - website
+            - library
+            - worker
+          enumNames:
+            - Servicio / API
+            - Sitio Web / Frontend
+            - Librería / SDK
+            - Worker / Job
+        lifecycle:
+          title: Estado del Ciclo de Vida
+          type: string
+          enum:
+            - experimental
+            - production
+            - deprecated
+          default: experimental
+          enumNames:
+            - Experimental (en desarrollo)
+            - Producción
+            - Deprecado
+
+    - title: Repositorio
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Ubicación del Repositorio
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  steps:
+    - id: fetch-template
+      name: Generar estructura del servicio
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          serviceName: ${{ parameters.serviceName }}
+          serviceTitle: ${{ parameters.serviceTitle }}
+          serviceDescription: ${{ parameters.serviceDescription }}
+          projectRef: ${{ parameters.projectRef }}
+          clientRef: ${{ parameters.clientRef }}
+          serviceType: ${{ parameters.serviceType }}
+          lifecycle: ${{ parameters.lifecycle }}
+          repoOwner: ${{ (parameters.repoUrl | parseRepoUrl).owner }}
+          repoName: ${{ (parameters.repoUrl | parseRepoUrl).repo }}
+
+    - id: publish
+      name: Publicar repositorio en GitHub
+      action: publish:github
+      input:
+        description: "${{ parameters.serviceTitle }} — parte de ${{ parameters.projectRef }}"
+        repoUrl: ${{ parameters.repoUrl }}
+        defaultBranch: main
+        repoVisibility: private
+
+    - id: register
+      name: Registrar servicio en el Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+    - id: notify
+      name: Notificar al cliente
+      action: notification:send
+      continueOnError: true
+      input:
+        recipients: entity
+        entityRefs:
+          - ${{ parameters.clientRef }}
+        title: "Nuevo servicio creado: ${{ parameters.serviceTitle }}"
+        info: >
+          El servicio ${{ parameters.serviceTitle }} ha sido creado dentro del proyecto
+          ${{ parameters.projectRef }} y registrado en el portal.
+        severity: normal
+
+  output:
+    links:
+      - title: Servicio en el Catalog
+        icon: catalog
+        entityRef: ${{ steps['register'].output.entityRef }}
+      - title: Repositorio
+        icon: github
+        url: ${{ steps['publish'].output.remoteUrl }}

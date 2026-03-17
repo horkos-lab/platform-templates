@@ -1,0 +1,155 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: client-onboarding
+  title: Onboarding de Nuevo Cliente
+  description: >
+    Registra un nuevo cliente en el portal, crea su repositorio de documentación
+    en GitHub y genera el checklist de onboarding.
+  tags:
+    - client
+    - onboarding
+    - documentation
+spec:
+  owner: group:default/platform-team
+  type: documentation
+
+  parameters:
+    - title: Información del Cliente
+      required:
+        - clientName
+        - clientTitle
+        - contactEmail
+        - accountManager
+        - engagementType
+        - clientTier
+      properties:
+        clientName:
+          title: Identificador del Cliente (slug)
+          type: string
+          description: >
+            Identificador único sin espacios ni mayúsculas. Ej: acme-corp, techstart-inc.
+          pattern: '^[a-z0-9-]+$'
+          ui:autofocus: true
+        clientTitle:
+          title: Nombre Completo de la Empresa
+          type: string
+          description: Nombre comercial tal como aparecerá en el portal.
+        contactEmail:
+          title: Email de Contacto Principal
+          type: string
+          format: email
+          description: Email del punto de contacto del cliente.
+        accountManager:
+          title: Account Manager Asignado
+          type: string
+          description: Usuario del portal responsable de esta cuenta.
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              - kind: User
+        engagementType:
+          title: Tipo de Engagement
+          type: string
+          enum:
+            - transformation
+            - support
+            - project
+          enumNames:
+            - Transformación Digital
+            - Soporte Continuo
+            - Proyecto Puntual
+        clientTier:
+          title: Segmento del Cliente
+          type: string
+          enum:
+            - enterprise
+            - mid-market
+            - startup
+          enumNames:
+            - Enterprise
+            - Mid-Market
+            - Startup
+        region:
+          title: Región Principal de Despliegue
+          type: string
+          enum:
+            - us-east
+            - us-west
+            - eu-west
+            - latam
+          default: us-east
+          enumNames:
+            - US East
+            - US West
+            - EU West
+            - LATAM
+
+    - title: Repositorio de Documentación
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Ubicación del Repositorio
+          type: string
+          description: >
+            Repositorio GitHub donde se almacenará la documentación del cliente.
+            Convención recomendada: client-{nombre}-docs
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  steps:
+    - id: fetch-template
+      name: Generar estructura de documentación
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          clientName: ${{ parameters.clientName }}
+          clientTitle: ${{ parameters.clientTitle }}
+          contactEmail: ${{ parameters.contactEmail }}
+          accountManager: ${{ parameters.accountManager }}
+          engagementType: ${{ parameters.engagementType }}
+          clientTier: ${{ parameters.clientTier }}
+          region: ${{ parameters.region }}
+
+    - id: publish
+      name: Publicar repositorio en GitHub
+      action: publish:github
+      input:
+        description: "Documentación y onboarding: ${{ parameters.clientTitle }}"
+        repoUrl: ${{ parameters.repoUrl }}
+        defaultBranch: main
+        repoVisibility: private
+
+    - id: register
+      name: Registrar cliente en el Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+    - id: notify
+      name: Notificar al Account Manager
+      action: notification:send
+      continueOnError: true
+      input:
+        recipients: entity
+        entityRefs:
+          - ${{ parameters.accountManager }}
+        title: "Nuevo cliente registrado: ${{ parameters.clientTitle }}"
+        info: >
+          El cliente ${{ parameters.clientTitle }} ha sido registrado en el portal.
+          Revisa su perfil para completar el checklist de onboarding.
+        severity: normal
+
+  output:
+    links:
+      - title: Perfil del Cliente en Catalog
+        icon: catalog
+        entityRef: ${{ steps['register'].output.entityRef }}
+      - title: Repositorio de Documentación
+        icon: github
+        url: ${{ steps['publish'].output.remoteUrl }}
