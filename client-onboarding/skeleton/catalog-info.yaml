@@ -7,17 +7,10 @@ metadata:
   annotations:
     backstage.io/techdocs-ref: dir:.
     clients.backstage.io/account-manager: ${{ values.accountManager }}
-    clients.backstage.io/tier: ${{ values.clientTier }}
-    clients.backstage.io/engagement-type: ${{ values.engagementType }}
-    clients.backstage.io/region: ${{ values.region }}
-  labels:
-    client-tier: ${{ values.clientTier }}
-    engagement-type: ${{ values.engagementType }}
 spec:
   type: client
   profile:
     displayName: ${{ values.clientTitle }}
-    email: ${{ values.contactEmail }}
   children: []
   members:
     - ${{ values.accountManager }}

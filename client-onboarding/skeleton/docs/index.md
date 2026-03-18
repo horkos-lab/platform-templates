@@ -7,10 +7,6 @@ Bienvenido al portal de documentación de **${{ values.clientTitle }}**.
 | Campo | Valor |
 |---|---|
 | **Cliente** | ${{ values.clientTitle }} |
-| **Tipo de Engagement** | ${{ values.engagementType }} |
-| **Segmento** | ${{ values.clientTier }} |
-| **Región** | ${{ values.region }} |
-| **Contacto Principal** | ${{ values.contactEmail }} |
 
 ## Proyectos Activos
 

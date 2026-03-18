@@ -6,7 +6,6 @@
 - [ ] Crear repositorio de documentación (completado automáticamente)
 - [ ] Asignar account manager: **${{ values.accountManager }}**
 - [ ] Configurar accesos al portal para el equipo del cliente
-- [ ] Enviar credenciales de acceso al contacto principal: `${{ values.contactEmail }}`
 
 ## Fase 2: Infraestructura
 

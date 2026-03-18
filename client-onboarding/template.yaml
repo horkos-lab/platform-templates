@@ -19,84 +19,42 @@ spec:
       required:
         - clientName
         - clientTitle
-        - contactEmail
         - accountManager
-        - engagementType
-        - clientTier
         - initialDomainSlug
         - initialDomainTitle
       properties:
         clientName:
           title: Identificador del Cliente (slug)
           type: string
-          description: >
-            Identificador único sin espacios ni mayúsculas. Ej: acme-corp, techstart-inc.
+          description: "Identificador único sin espacios ni mayúsculas. Ej: acme"
           pattern: '^[a-z0-9-]+$'
           ui:autofocus: true
         clientTitle:
           title: Nombre Completo de la Empresa
           type: string
-          description: Nombre comercial tal como aparecerá en el portal.
-        contactEmail:
-          title: Email de Contacto Principal
-          type: string
-          format: email
-          description: Email del punto de contacto del cliente.
+          description: "Nombre comercial tal como aparecerá en el portal. Ej: Acme"
         accountManager:
           title: Account Manager Asignado
           type: string
-          description: Usuario del portal responsable de esta cuenta.
-          ui:field: EntityPicker
-          ui:options:
-            catalogFilter:
-              - kind: User
-        engagementType:
-          title: Tipo de Engagement
-          type: string
+          description: Miembro del equipo responsable de gestionar esta cuenta.
           enum:
-            - transformation
-            - support
-            - project
+            - cesar
+            - ronal
+            - jorge
           enumNames:
-            - Transformación Digital
-            - Soporte Continuo
-            - Proyecto Puntual
-        clientTier:
-          title: Segmento del Cliente
-          type: string
-          enum:
-            - enterprise
-            - mid-market
-            - startup
-          enumNames:
-            - Enterprise
-            - Mid-Market
-            - Startup
-        region:
-          title: Región Principal de Despliegue
-          type: string
-          enum:
-            - us-east
-            - us-west
-            - eu-west
-            - latam
-          default: us-east
-          enumNames:
-            - US East
-            - US West
-            - EU West
-            - LATAM
+            - Cesar
+            - Ronal
+            - Jorge
         initialDomainSlug:
           title: Identificador del Dominio Inicial (slug)
           type: string
-          description: >
-            Slug del primer dominio de negocio del cliente. Ej: erp-finance, ecommerce, portal-ux.
+          description: "Slug del primer dominio de negocio del cliente. Ej: acme-domain"
           pattern: '^[a-z0-9-]+$'
           default: main-domain
         initialDomainTitle:
           title: Nombre del Dominio Inicial
           type: string
-          description: Nombre descriptivo del primer dominio de negocio.
+          description: "Nombre descriptivo del primer dominio de negocio. Ej: Acme Domain"
           default: Main Domain
 
     - title: Repositorio de Documentación
@@ -106,9 +64,7 @@ spec:
         repoUrl:
           title: Ubicación del Repositorio
           type: string
-          description: >
-            Repositorio GitHub donde se almacenará la documentación del cliente.
-            Convención recomendada: client-{nombre}-docs
+          description: Repositorio GitHub donde se almacenará la documentación del cliente.
           ui:field: RepoUrlPicker
           ui:options:
             allowedHosts:
@@ -123,11 +79,7 @@ spec:
         values:
           clientName: ${{ parameters.clientName }}
           clientTitle: ${{ parameters.clientTitle }}
-          contactEmail: ${{ parameters.contactEmail }}
           accountManager: ${{ parameters.accountManager }}
-          engagementType: ${{ parameters.engagementType }}
-          clientTier: ${{ parameters.clientTier }}
-          region: ${{ parameters.region }}
           initialDomainSlug: ${{ parameters.initialDomainSlug }}
           initialDomainTitle: ${{ parameters.initialDomainTitle }}
 
@@ -146,20 +98,6 @@ spec:
       input:
         repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
         catalogInfoPath: '/catalog-info.yaml'
-
-    - id: notify
-      name: Notificar al Account Manager
-      action: notification:send
-      continueOnError: true
-      input:
-        recipients: entity
-        entityRefs:
-          - ${{ parameters.accountManager }}
-        title: "Nuevo cliente registrado: ${{ parameters.clientTitle }}"
-        info: >
-          El cliente ${{ parameters.clientTitle }} ha sido registrado en el portal.
-          Revisa su perfil para completar el checklist de onboarding.
-        severity: normal
 
   output:
     links:
